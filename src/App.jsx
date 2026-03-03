@@ -17,7 +17,7 @@ async function callAI(systemPrompt, messages) {
         "X-Title": "entropyzero",
       },
       body: JSON.stringify({
-        model: "anthropic/claude-3.5-sonnet",
+        model: "anthropic/claude-3.5-sonnet:beta",
         max_tokens: 600,
         messages: [{ role: "system", content: systemPrompt }, ...messages],
       }),
