@@ -3,7 +3,7 @@ import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { TrendingUp, Activity, Plus, Trash2, Send, ChevronRight, ChevronLeft, Check, X, Download, Upload, BarChart2, BookOpen, Settings, Zap, Newspaper, Star, AlertTriangle, Brain, Target, Calendar, Award, Flame, Moon, Layers, Info } from "lucide-react";
 
 // ── AI: OpenRouter (primary) + Anthropic direct fallback ────────────────────
-const OR_KEY = "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";
+const OR_KEY = "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";
 
 async function callAI(systemPrompt, messages) {
   // Try OpenRouter first
@@ -17,7 +17,7 @@ async function callAI(systemPrompt, messages) {
         "X-Title": "entropyzero",
       },
       body: JSON.stringify({
-        model: "anthropic/claude-3.5-sonnet:beta",
+        model: "openrouter/auto",
         max_tokens: 600,
         messages: [{ role: "system", content: systemPrompt }, ...messages],
       }),
