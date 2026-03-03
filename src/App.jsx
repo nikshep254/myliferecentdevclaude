@@ -1,20 +1,20 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, RadarChart, Radar, PolarGrid, PolarAngleAxis } from "recharts";
 import { TrendingUp, Activity, Plus, Trash2, Send, ChevronRight, ChevronLeft, Check, X, Download, Upload, BarChart2, BookOpen, Settings, Zap, Newspaper, Star, AlertTriangle, Brain, Target, Calendar, Award, Flame, Moon, Layers, Info } from "lucide-react";
 
-// ── env var (Vite) ─────────────────────────────────────────────────────────────
-const AI_KEY = import.meta.env.VITE_OPENROUTER_KEY || "";
+// ── AI: OpenRouter (primary) + Anthropic direct fallback ────────────────────
+const OR_KEY = "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";
 
-// ── AI call: OpenRouter first, fallback Anthropic direct ──────────────────────
 async function callAI(systemPrompt, messages) {
-  const key = window.__OR_KEY || AI_KEY;
-  if (key) {
+  // Try OpenRouter first
+  try {
     const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": `Bearer ${key}`,
-        "HTTP-Referer": "https://mylifeindex.app",
+        "Authorization": `Bearer ${OR_KEY}`,
+        "HTTP-Referer": "https://entropyzero.app",
+        "X-Title": "entropyzero",
       },
       body: JSON.stringify({
         model: "anthropic/claude-3.5-sonnet",
@@ -23,9 +23,9 @@ async function callAI(systemPrompt, messages) {
       }),
     });
     const d = await res.json();
-    return d.choices?.[0]?.message?.content || "No response.";
-  }
-  // Anthropic direct (works in Claude artifact sandbox only)
+    if (d.choices?.[0]?.message?.content) return d.choices[0].message.content;
+  } catch (_) {}
+  // Fallback: Anthropic direct (works in Claude artifact sandbox)
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -40,12 +40,24 @@ async function callAI(systemPrompt, messages) {
   return d.content?.[0]?.text || "No response.";
 }
 
-// ── utils ──────────────────────────────────────────────────────────────────────
+// ── Persistent storage helpers ──────────────────────────────────────────────
+const STORAGE_KEY = "entropyzero-v3";
+
+async function loadAllData() {
+  try {
+    const result = await window.storage.get(STORAGE_KEY);
+    return result ? JSON.parse(result.value) : null;
+  } catch (_) { return null; }
+}
+
+async function saveAllData(data) {
+  try { await window.storage.set(STORAGE_KEY, JSON.stringify(data)); } catch (_) {}
+}
+
+// ── utils ────────────────────────────────────────────────────────────────────
 const uid = () => Math.random().toString(36).slice(2, 9);
 const today = () => new Date().toISOString().split("T")[0];
 const fmt = (n, d = 2) => parseFloat(n).toFixed(d);
-const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) {} };
-const load = (k, d) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (_) { return d; } };
 
 const CURRENCIES = {
   "United States": { symbol: "$", code: "USD" }, "India": { symbol: "₹", code: "INR" },
@@ -70,11 +82,11 @@ const TREND_OPTIONS = [
   { label: "Crashing 🔻", value: -2.5 },
 ];
 
-const EMOJIS        = ["📅","🏫","🎓","💼","❤️","🌍","🏠","⚡","🌱","🔥","🏆","💔","🎯","🌙","⛈️"];
-const COLORS        = ["#a3a3a3","#60a5fa","#34d399","#f59e0b","#f87171","#c084fc","#fb923c","#e2e8f0"];
-const SKILL_LEVELS  = ["Beginner","Developing","Proficient","Advanced","Expert"];
-const DEBT_SEVERITY = ["Minor","Moderate","Significant","Critical"];
-const MOOD_LABELS   = ["😞","😕","😐","🙂","😊","😄","🤩"];
+const EMOJIS       = ["📅","🏫","🎓","💼","❤️","🌍","🏠","⚡","🌱","🔥","🏆","💔","🎯","🌙","⛈️"];
+const COLORS       = ["#a3a3a3","#60a5fa","#34d399","#f59e0b","#f87171","#c084fc","#fb923c","#e2e8f0"];
+const SKILL_LEVELS = ["Beginner","Developing","Proficient","Advanced","Expert"];
+const DEBT_SEVERITY= ["Minor","Moderate","Significant","Critical"];
+const MOOD_LABELS  = ["😞","😕","😐","🙂","😊","😄","🤩"];
 
 const ACHIEVEMENTS = [
   { id: "first_log",  icon: "🌱", title: "First Step",      desc: "Log your first habit",    check: (o) => o.length >= 1 },
@@ -110,7 +122,7 @@ const FEATURE_INFO = {
   pnl:          { title: "Monthly P&L",            body: "Profit & Loss per month. Green = net positive, red = net negative. Count shows how many times you logged. Consistency > intensity." },
 };
 
-// ── Info tooltip ───────────────────────────────────────────────────────────────
+// ── Info tooltip ─────────────────────────────────────────────────────────────
 const InfoTooltip = ({ feature }) => {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
@@ -186,7 +198,7 @@ const generateFromPhases = (phases, startPrice, dob) => {
   return data;
 };
 
-// ── Builder footer ─────────────────────────────────────────────────────────────
+// ── Builder footer ────────────────────────────────────────────────────────────
 const BuilderCard = () => (
   <div className="w-full max-w-3xl mx-auto px-4 pb-6 pt-2">
     <div className="relative rounded-2xl p-px overflow-hidden" style={{ background: "linear-gradient(135deg,#b8860b,#ffd700,#daa520,#f5c518,#b8860b)" }}>
@@ -213,7 +225,7 @@ const BuilderCard = () => (
   </div>
 );
 
-// ── Design tokens ──────────────────────────────────────────────────────────────
+// ── Design tokens ─────────────────────────────────────────────────────────────
 const C = { bg: "bg-[#080808]", card: "bg-[#111111]", border: "border-[#1e1e1e]", input: "bg-[#0e0e0e] border-[#1e1e1e]" };
 const Card = ({ children, className = "" }) => <div className={`${C.card} border ${C.border} rounded-2xl p-5 ${className}`}>{children}</div>;
 const Input = ({ className = "", ...p }) => <input className={`${C.input} border rounded-xl px-4 py-2.5 text-[#e8e8e8] placeholder-[#333] focus:outline-none focus:border-[#333] text-sm transition-all ${className}`} {...p} />;
@@ -234,13 +246,13 @@ const StatCard = ({ label, value, sub, colorClass, feature }) => (
   </div>
 );
 
-// ── Welcome ────────────────────────────────────────────────────────────────────
+// ── Welcome ───────────────────────────────────────────────────────────────────
 const WelcomeScreen = ({ onContinue }) => (
   <div className={`min-h-screen ${C.bg} flex flex-col items-center justify-center p-6`}>
     <div className="w-full max-w-sm">
       <div className="text-center mb-10">
         <div className="w-16 h-16 bg-[#111] border border-[#1e1e1e] rounded-2xl flex items-center justify-center mx-auto mb-5 text-3xl">📈</div>
-        <h1 className="text-3xl font-semibold text-[#e8e8e8] tracking-tight">MyLife Index</h1>
+        <h1 className="text-3xl font-semibold text-[#e8e8e8] tracking-tight">entropyzero</h1>
         <p className="text-[#444] text-sm mt-2">Your life, quantified.</p>
       </div>
       <div className="grid grid-cols-2 gap-3 mb-6">
@@ -252,9 +264,8 @@ const WelcomeScreen = ({ onContinue }) => (
           </div>
         ))}
         <div className="col-span-2 bg-[#0e0e0e] border border-[#222] rounded-2xl p-5 space-y-3">
-          <p className="text-[#555] text-xs text-center leading-relaxed">Data stored locally on your device. Export a backup anytime from Settings.</p>
+          <p className="text-[#555] text-xs text-center leading-relaxed">Data stored in this artifact session. Export a backup anytime from Settings.</p>
           <button onClick={onContinue} className="w-full flex items-center justify-center gap-2 bg-[#e8e8e8] hover:bg-[#d0d0d0] text-[#080808] rounded-xl py-3.5 font-semibold text-sm transition-all">Get Started →</button>
-          <p className="text-center text-[#2a2a2a] text-[10px]">No account required · 100% local</p>
         </div>
       </div>
     </div>
@@ -334,7 +345,7 @@ const Onboarding = ({ onComplete }) => {
   return (<Shell step={6} onNext={finish} onBack={b} nextLabel="🚀 Launch"><h2 className="text-xl font-semibold text-[#e8e8e8] mb-4">Ready to Launch</h2>{[["👤 Name", prof.name], ["📈 Ticker", `$${prof.ticker || prof.name.slice(0, 4).toUpperCase()}`], ["🌍 Country", `${loc.country} · ${CURRENCIES[loc.country]?.code}`], ["💰 IPO", `${CURRENCIES[loc.country]?.symbol}${price.startPrice}`], ["🗂️ Phases", `${story.phases.length} phases`], ["✅ Habits", `${hab.habits.length} habits`]].map(([k, v]) => <div key={k} className="flex justify-between items-center bg-[#0e0e0e] border border-[#1e1e1e] rounded-xl px-4 py-3 mb-2"><span className="text-sm text-[#555]">{k}</span><span className="text-sm text-[#ccc]">{v}</span></div>)}</Shell>);
 };
 
-// ── Chart tooltip ──────────────────────────────────────────────────────────────
+// ── Chart tooltip ─────────────────────────────────────────────────────────────
 const CustomTooltip = ({ active, payload, phases, curr }) => {
   if (!active || !payload?.length) return null;
   const d = payload[0].payload;
@@ -349,7 +360,7 @@ const CustomTooltip = ({ active, payload, phases, curr }) => {
   );
 };
 
-// ── Profit/Loss area chart ─────────────────────────────────────────────────────
+// ── Profit/Loss area chart ────────────────────────────────────────────────────
 const ProfitLossChart = ({ data, phases, curr, timeRange }) => {
   const isProfit = useMemo(() => {
     if (data.length < 2) return true;
@@ -377,7 +388,7 @@ const ProfitLossChart = ({ data, phases, curr, timeRange }) => {
   );
 };
 
-// ── Heatmap ────────────────────────────────────────────────────────────────────
+// ── Heatmap ───────────────────────────────────────────────────────────────────
 const Heatmap = ({ orderBook }) => {
   const year = new Date().getFullYear();
   const days = useMemo(() => { const m = {}; orderBook.forEach(o => { if (!m[o.date]) m[o.date] = 0; m[o.date] += o.change; }); return m; }, [orderBook]);
@@ -413,7 +424,7 @@ const Heatmap = ({ orderBook }) => {
   );
 };
 
-// ── Sector Radar ───────────────────────────────────────────────────────────────
+// ── Sector Radar ──────────────────────────────────────────────────────────────
 const SectorRadar = ({ sectorScores }) => {
   const data = SECTORS.map(s => ({ subject: s.label, value: Math.min(100, Math.max(0, sectorScores[s.id] || 50)), fullMark: 100 }));
   return (
@@ -427,25 +438,24 @@ const SectorRadar = ({ sectorScores }) => {
   );
 };
 
-// ── AI Coach ───────────────────────────────────────────────────────────────────
+// ── AI Coach ──────────────────────────────────────────────────────────────────
 const AICoach = ({ config, lifeIndex, orderBook, skills, weaknesses, phases, habits }) => {
   const [messages, setMessages] = useState([{ role: "assistant", content: `Hey ${config.name}! I'm your AI Life Coach. I have full context on your index (${fmt(lifeIndex)}), ${phases.length} phases, ${skills.length} skills, ${weaknesses.length} weaknesses and ${orderBook.length} logged events. Ask me anything.` }]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem("or_key") || "");
-  const [showKey, setShowKey] = useState(false);
 
+  const bottomRef = useRef(null);
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, loading]);
   const send = async () => {
     if (!input.trim() || loading) return;
     const userMsg = { role: "user", content: input };
     setMessages(p => [...p, userMsg]); setInput(""); setLoading(true);
-    if (apiKey) window.__OR_KEY = apiKey;
     try {
       const ctx = `Elite life coach AI. User: Name=${config.name}, Country=${config.country}, Index=${fmt(lifeIndex)}, AllTime=${fmt(((lifeIndex - config.startPrice) / config.startPrice) * 100)}%, Phases=${phases.map(p => `${p.name}(${p.start}–${p.end || "now"})`).join(",") || "none"}, Skills=${skills.map(s => `${s.name}(${SKILL_LEVELS[s.level]})`).join(",") || "none"}, Weaknesses=${weaknesses.map(w => `${w.name}(${DEBT_SEVERITY[w.severity]})`).join(",") || "none"}, Habits=${habits.map(h => `${h.name}(${h.impact > 0 ? "+" : ""}${h.impact}%)`).join(",") || "none"}, Recent=${orderBook.slice(0, 10).map(o => `${o.desc}:${o.change > 0 ? "+" : ""}${fmt(o.change)}%`).join(",") || "none"}. Reply max 180 words, be direct and data-driven.`;
       const reply = await callAI(ctx, [...messages, userMsg].filter(m => m.role !== "system"));
       setMessages(p => [...p, { role: "assistant", content: reply }]);
     } catch (e) {
-      setMessages(p => [...p, { role: "assistant", content: "Connection error. Add your OpenRouter key below, or set VITE_OPENROUTER_KEY in Vercel env vars." }]);
+      setMessages(p => [...p, { role: "assistant", content: "Connection error. Check your OpenRouter key or network." }]);
     }
     setLoading(false);
   };
@@ -455,18 +465,6 @@ const AICoach = ({ config, lifeIndex, orderBook, skills, weaknesses, phases, hab
       <div className="flex items-center justify-between mb-4">
         <h2 className="font-semibold text-[#e8e8e8] text-sm flex items-center gap-2"><Brain size={16} className="text-[#333]" />AI Life Coach</h2>
         <InfoTooltip feature="coach" />
-      </div>
-      <div className="mb-4 bg-[#0a0a0a] border border-[#1a1a1a] rounded-xl p-3">
-        <button onClick={() => setShowKey(o => !o)} className="text-[10px] text-[#444] hover:text-[#888] transition-colors w-full text-left flex items-center justify-between">
-          <span>🔑 OpenRouter API Key (for deployed version)</span>
-          <span>{showKey ? "▲" : "▼"}</span>
-        </button>
-        {showKey && (
-          <div className="mt-2 space-y-1.5">
-            <Input type="password" value={apiKey} onChange={e => { setApiKey(e.target.value); localStorage.setItem("or_key", e.target.value); window.__OR_KEY = e.target.value; }} placeholder="sk-or-v1-…" className="w-full text-xs" />
-            <p className="text-[10px] text-[#333]">Stored locally. On Vercel set <code className="text-[#555]">VITE_OPENROUTER_KEY</code> env var instead — then this field is not needed.</p>
-          </div>
-        )}
       </div>
       <div className="space-y-3 max-h-80 overflow-y-auto mb-4 pr-1">
         {messages.map((m, i) => (
@@ -492,7 +490,7 @@ const AICoach = ({ config, lifeIndex, orderBook, skills, weaknesses, phases, hab
   );
 };
 
-// ── Tabs config ────────────────────────────────────────────────────────────────
+// ── Tabs config ───────────────────────────────────────────────────────────────
 const TABS = [
   { id: "chart",    icon: <BarChart2 size={16} />, label: "Index" },
   { id: "coach",    icon: <Brain size={16} />,     label: "Coach" },
@@ -504,52 +502,45 @@ const TABS = [
   { id: "settings", icon: <Settings size={16} />,  label: "Settings" },
 ];
 
-// ── Dashboard ──────────────────────────────────────────────────────────────────
-const Dashboard = ({ config, onReset }) => {
+// ── Dashboard ─────────────────────────────────────────────────────────────────
+const Dashboard = ({ config, onReset, initialData }) => {
   const curr = CURRENCIES[config.country]?.symbol || "$";
   const ticker = config.ticker || config.name.slice(0, 4).toUpperCase();
 
-  const [chartData, setChartData]       = useState(() => load("mli_chart3", null) || generateFromPhases(config.phases, config.startPrice, config.dob));
-  const [orderBook, setOrderBook]       = useState(() => load("mli_orders3", []));
-  const [habits, setHabits]             = useState(() => load("mli_habits3", config.habits || []));
-  const [phases, setPhases]             = useState(() => load("mli_phases3", config.phases || []));
-  const [skills, setSkills]             = useState(() => load("mli_skills3", []));
-  const [weaknesses, setWeaknesses]     = useState(() => load("mli_debts3", []));
-  const [pressReleases, setPressReleases] = useState(() => load("mli_press3", []));
-  const [moodLog, setMoodLog]           = useState(() => load("mli_mood", {}));
-  const [goals, setGoals]               = useState(() => load("mli_goals", []));
-  const [unlockedAch, setUnlockedAch]   = useState(() => load("mli_ach", []));
-  const [timeCapsules, setTimeCapsules] = useState(() => load("mli_capsules", []));
-  const [view, setView]                 = useState("chart");
-  const [timeRange, setTimeRange]       = useState("ALL");
-  const [scenario, setScenario]         = useState("");
+  const [chartData, setChartData]         = useState(() => initialData?.chartData || generateFromPhases(config.phases, config.startPrice, config.dob));
+  const [orderBook, setOrderBook]         = useState(() => initialData?.orderBook || []);
+  const [habits, setHabits]               = useState(() => initialData?.habits || config.habits || []);
+  const [phases, setPhases]               = useState(() => initialData?.phases || config.phases || []);
+  const [skills, setSkills]               = useState(() => initialData?.skills || []);
+  const [weaknesses, setWeaknesses]       = useState(() => initialData?.weaknesses || []);
+  const [pressReleases, setPressReleases] = useState(() => initialData?.pressReleases || []);
+  const [moodLog, setMoodLog]             = useState(() => initialData?.moodLog || {});
+  const [goals, setGoals]                 = useState(() => initialData?.goals || []);
+  const [unlockedAch, setUnlockedAch]     = useState(() => initialData?.unlockedAch || []);
+  const [timeCapsules, setTimeCapsules]   = useState(() => initialData?.timeCapsules || []);
+  const [view, setView]                   = useState("chart");
+  const [timeRange, setTimeRange]         = useState("ALL");
+  const [scenario, setScenario]           = useState("");
   const [scenarioImpact, setScenarioImpact] = useState("");
-  const [prTitle, setPrTitle]           = useState("");
-  const [prBody, setPrBody]             = useState("");
-  const [prImpact, setPrImpact]         = useState("");
-  const [prType, setPrType]             = useState("neutral");
-  const [newSkill, setNewSkill]         = useState({ name: "", level: 0, category: "Technical", sector: "skills", developingHabit: "" });
-  const [newDebt, setNewDebt]           = useState({ name: "", severity: 0, category: "Mental", plan: "" });
-  const [newGoal, setNewGoal]           = useState({ title: "", sector: "academics", reward: 0 });
-  const [capsule, setCapsule]           = useState({ message: "", unlockDate: "" });
-  const [moreTab, setMoreTab]           = useState("heatmap");
+  const [prTitle, setPrTitle]             = useState("");
+  const [prBody, setPrBody]               = useState("");
+  const [prImpact, setPrImpact]           = useState("");
+  const [prType, setPrType]               = useState("neutral");
+  const [newSkill, setNewSkill]           = useState({ name: "", level: 0, category: "Technical", sector: "skills", developingHabit: "" });
+  const [newDebt, setNewDebt]             = useState({ name: "", severity: 0, category: "Mental", plan: "" });
+  const [newGoal, setNewGoal]             = useState({ title: "", sector: "academics", reward: 0 });
+  const [capsule, setCapsule]             = useState({ message: "", unlockDate: "" });
+  const [moreTab, setMoreTab]             = useState("heatmap");
 
-  useEffect(() => { save("mli_chart3",   chartData);      }, [chartData]);
-  useEffect(() => { save("mli_orders3",  orderBook);      }, [orderBook]);
-  useEffect(() => { save("mli_habits3",  habits);         }, [habits]);
-  useEffect(() => { save("mli_phases3",  phases);         }, [phases]);
-  useEffect(() => { save("mli_skills3",  skills);         }, [skills]);
-  useEffect(() => { save("mli_debts3",   weaknesses);     }, [weaknesses]);
-  useEffect(() => { save("mli_press3",   pressReleases);  }, [pressReleases]);
-  useEffect(() => { save("mli_mood",     moodLog);        }, [moodLog]);
-  useEffect(() => { save("mli_goals",    goals);          }, [goals]);
-  useEffect(() => { save("mli_ach",      unlockedAch);    }, [unlockedAch]);
-  useEffect(() => { save("mli_capsules", timeCapsules);   }, [timeCapsules]);
+  // Save all state to persistent storage whenever anything changes
+  useEffect(() => {
+    saveAllData({ config, chartData, orderBook, habits, phases, skills, weaknesses, pressReleases, moodLog, goals, unlockedAch, timeCapsules });
+  }, [chartData, orderBook, habits, phases, skills, weaknesses, pressReleases, moodLog, goals, unlockedAch, timeCapsules]);
 
-  const lifeIndex    = chartData[chartData.length - 1]?.value || config.startPrice;
-  const todayOrders  = orderBook.filter(o => o.date === today());
-  const todayChange  = todayOrders.reduce((s, o) => s + o.change, 0);
-  const allTime      = ((lifeIndex - config.startPrice) / config.startPrice) * 100;
+  const lifeIndex   = chartData[chartData.length - 1]?.value || config.startPrice;
+  const todayOrders = orderBook.filter(o => o.date === today());
+  const todayChange = todayOrders.reduce((s, o) => s + o.change, 0);
+  const allTime     = ((lifeIndex - config.startPrice) / config.startPrice) * 100;
 
   const last7d = useMemo(() => {
     const c = chartData.filter(d => d.timestamp >= Date.now() - 7 * 86400000);
@@ -611,7 +602,7 @@ const Dashboard = ({ config, onReset }) => {
     if (/(award|won|prize|achieve)/.test(t)) impact = 4;
     if (/(vacation|trip|travel)/.test(t)) impact = 2.5;
     if (scenarioImpact.trim() && !isNaN(parseFloat(scenarioImpact))) impact = parseFloat(scenarioImpact);
-    if (!impact) { alert("Add a % override."); return; }
+    if (!impact) { alert("Add a % override to log this event."); return; }
     execute(`📌 ${scenario.slice(0, 70)}`, impact, "event");
     setScenario(""); setScenarioImpact("");
   };
@@ -656,34 +647,12 @@ const Dashboard = ({ config, onReset }) => {
     return filteredData[filteredData.length - 1].value >= filteredData[0].value;
   }, [filteredData]);
 
-  const applyImport = (d) => {
-    let imp = { chart: null, orders: null, habits: null, phases: null };
-    const isOld = d.chartData && d.orderBook !== undefined && !d.version;
-    if (isOld) {
-      if (Array.isArray(d.chartData)) imp.chart = d.chartData.map(p => ({ ...p, value: isNaN(parseFloat(p.value)) ? 500 : parseFloat(p.value), timestamp: p.timestamp || new Date(p.date).getTime() }));
-      if (Array.isArray(d.orderBook)) imp.orders = d.orderBook.map(o => ({ id: o.id || uid(), time: o.time || "00:00:00", date: o.date || today(), desc: o.description || o.desc || "Imported", change: isNaN(parseFloat(o.change)) ? 0 : parseFloat(o.change), newIndex: isNaN(parseFloat(o.newIndex)) ? "" : parseFloat(o.newIndex).toFixed(2), tag: "imported" }));
-      if (Array.isArray(d.habits)) {
-        const conv = [];
-        d.habits.forEach(h => {
-          if (Array.isArray(h.impacts) && h.impacts.length > 0) {
-            h.impacts.forEach((imp2, i) => { const tn = Array.isArray(h.tiers) && h.tiers[i] ? ` (${h.tiers[i]})` : "", impact = parseFloat(imp2) || 0; conv.push({ id: uid(), name: `${h.name}${tn}`, impact, type: impact >= 0 ? "positive" : "negative", emoji: impact >= 0 ? "✅" : "❌", sector: classifyHabit(h.name) }); });
-            if (h.failurePenalty != null) { const fp = parseFloat(h.failurePenalty) || 0; conv.push({ id: uid(), name: `${h.name} (Failed)`, impact: fp, type: "negative", emoji: "❌", sector: classifyHabit(h.name) }); }
-          } else { const impact = parseFloat(h.impact) || 0; conv.push({ id: h.id || uid(), name: h.name || "Unnamed", impact, type: impact >= 0 ? "positive" : "negative", emoji: impact >= 0 ? "✅" : "❌", sector: classifyHabit(h.name) }); }
-        });
-        imp.habits = conv;
-      }
-    } else { imp.chart = d.chartData || null; imp.orders = d.orderBook || null; imp.habits = d.habits || null; imp.phases = d.phases || null; }
-    if (imp.chart?.length) setChartData(imp.chart);
-    if (imp.orders?.length) setOrderBook(imp.orders);
-    if (imp.habits?.length) setHabits(imp.habits);
-    if (imp.phases?.length) setPhases(imp.phases);
-    if (d.skills) setSkills(d.skills);
-    if (d.weaknesses) setWeaknesses(d.weaknesses);
-    if (d.pressReleases) setPressReleases(d.pressReleases);
-    if (d.moodLog) setMoodLog(d.moodLog);
-    if (d.goals) setGoals(d.goals);
-    if (d.timeCapsules) setTimeCapsules(d.timeCapsules);
-    alert(`✅ Import complete!\n• Chart: ${imp.chart?.length || 0} points\n• Orders: ${imp.orders?.length || 0}\n• Habits: ${imp.habits?.length || 0}`);
+  const exportData = () => {
+    const data = JSON.stringify({ config, chartData, orderBook, habits, phases, skills, weaknesses, pressReleases, moodLog, goals, timeCapsules, exportDate: new Date().toISOString(), version: "3.0" }, null, 2);
+    const blob = new Blob([data], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a"); a.href = url; a.download = `entropyzero-${today()}.json`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
   };
 
   return (
@@ -1083,21 +1052,14 @@ const Dashboard = ({ config, onReset }) => {
             </Card>
             <Card>
               <h2 className="font-semibold text-[#e8e8e8] text-sm mb-1 flex items-center gap-2"><Download size={15} className="text-[#333]" />Export Data</h2>
-              <p className="text-xs text-[#333] mb-4">Full backup as JSON.</p>
-              <Btn variant="ghost" className="w-full" onClick={() => { const blob = new Blob([JSON.stringify({ config, chartData, orderBook, habits, phases, skills, weaknesses, pressReleases, moodLog, goals, timeCapsules, exportDate: new Date().toISOString(), version: "3.0" }, null, 2)], { type: "application/json" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `mylife-index-${today()}.json`; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url); }}><Download size={15} />Export All Data</Btn>
-            </Card>
-            <Card>
-              <h2 className="font-semibold text-[#e8e8e8] text-sm mb-1 flex items-center gap-2"><Upload size={15} className="text-[#333]" />Import Data</h2>
-              <p className="text-xs text-[#333] mb-4">Restore from a backup. Supports old Nikshep Life format.</p>
-              <label className="w-full px-4 py-2.5 rounded-xl font-medium text-sm transition-all flex items-center justify-center gap-2 bg-[#161616] border border-[#1e1e1e] text-[#888] hover:bg-[#1a1a1a] hover:text-[#e8e8e8] cursor-pointer">
-                <Upload size={15} />Choose Backup File (.json)
-                <input type="file" accept=".json" className="hidden" onChange={e => { const f = e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = ev => { try { applyImport(JSON.parse(ev.target.result)); } catch { alert("❌ Invalid file."); } }; r.readAsText(f); e.target.value = ""; }} />
-              </label>
+              <p className="text-xs text-[#333] mb-1">Full backup as JSON.</p>
+              <p className="text-[10px] text-[#2a2a2a] mb-4">For Vercel: set <code className="text-[#444]">VITE_OPENROUTER_KEY</code> in env vars to override the hardcoded key.</p>
+              <Btn variant="ghost" className="w-full" onClick={exportData}><Download size={15} />Export All Data</Btn>
             </Card>
             <Card>
               <h2 className="font-semibold text-[#e8e8e8] text-sm mb-1 flex items-center gap-2"><AlertTriangle size={15} className="text-red-900" />Danger Zone</h2>
-              <p className="text-xs text-[#333] mb-4">Permanently delete all data.</p>
-              <Btn variant="danger" className="w-full" onClick={() => { if (window.confirm("Reset ALL data? Cannot be undone.")) { "mli_chart3 mli_orders3 mli_habits3 mli_phases3 mli_skills3 mli_debts3 mli_press3 mli_mood mli_goals mli_ach mli_capsules mli_config3".split(" ").forEach(k => localStorage.removeItem(k)); onReset(); } }}><Trash2 size={15} />Reset Everything</Btn>
+              <p className="text-xs text-[#333] mb-4">Permanently delete all data and restart.</p>
+              <Btn variant="danger" className="w-full" onClick={() => { if (window.confirm("Reset ALL data? Cannot be undone.")) { saveAllData(null).then(() => onReset()); } }}><Trash2 size={15} />Reset Everything</Btn>
             </Card>
           </div>
         )}
@@ -1107,46 +1069,83 @@ const Dashboard = ({ config, onReset }) => {
   );
 };
 
-// ── Root ───────────────────────────────────────────────────────────────────────
+// ── Root ──────────────────────────────────────────────────────────────────────
 export default function App() {
-  const [started, setStarted]     = useState(false);
-  const [config, setConfig]       = useState(() => load("mli_config3", null));
-  const [key, setKey]             = useState(0);
+  const [appState, setAppState] = useState("loading"); // loading | welcome | onboarding | dashboard
+  const [config, setConfig]     = useState(null);
+  const [initialData, setInitialData] = useState(null);
+  const [key, setKey]           = useState(0);
   const [importing, setImporting] = useState(false);
 
-  const handleComplete = (profile) => { save("mli_config3", profile); setConfig(profile); };
-  const handleReset    = () => { setConfig(null); setStarted(false); setKey(k => k + 1); };
+  useEffect(() => {
+    loadAllData().then(data => {
+      if (data && data.config) {
+        setConfig(data.config);
+        setInitialData(data);
+        setAppState("dashboard");
+      } else {
+        setAppState("welcome");
+      }
+    });
+  }, []);
+
+  const handleComplete = async (profile) => {
+    setConfig(profile);
+    await saveAllData({ config: profile });
+    setAppState("dashboard");
+  };
+
+  const handleReset = async () => {
+    await saveAllData(null);
+    setConfig(null);
+    setInitialData(null);
+    setKey(k => k + 1);
+    setAppState("welcome");
+  };
+
+  if (appState === "loading") {
+    return (
+      <div className="min-h-screen bg-[#080808] flex items-center justify-center">
+        <div className="text-center">
+          <div className="text-4xl mb-4 animate-pulse">📈</div>
+          <p className="text-[#333] text-sm">Loading your index…</p>
+        </div>
+      </div>
+    );
+  }
 
   const handleDirectImport = (e) => {
     const f = e.target.files[0]; if (!f) return;
     setImporting(true);
     const r = new FileReader();
-    r.onload = ev => {
+    r.onload = async (ev) => {
       try {
         const d = JSON.parse(ev.target.result);
         let cfg = d.config || null;
         if (!cfg && d.lifeIndex !== undefined) cfg = { name: "Imported User", ticker: "USER", country: "Other", startPrice: d.chartData?.[0]?.value || 500, dob: "", phases: [], habits: [] };
-        if (!cfg) { alert("❌ No profile found."); setImporting(false); return; }
-        save("mli_config3", cfg);
-        if (Array.isArray(d.chartData)) save("mli_chart3", d.chartData.map(p => ({ ...p, value: isNaN(parseFloat(p.value)) ? 500 : parseFloat(p.value), timestamp: p.timestamp || new Date(p.date).getTime() })));
-        if (Array.isArray(d.orderBook)) save("mli_orders3", d.orderBook.map(o => ({ ...o, desc: o.desc || o.description || "Imported", change: isNaN(parseFloat(o.change)) ? 0 : parseFloat(o.change), newIndex: isNaN(parseFloat(o.newIndex)) ? "" : parseFloat(o.newIndex).toFixed(2) })));
-        if (d.skills)        save("mli_skills3",  d.skills);
-        if (d.weaknesses)    save("mli_debts3",   d.weaknesses);
-        if (d.pressReleases) save("mli_press3",   d.pressReleases);
-        if (d.moodLog)       save("mli_mood",     d.moodLog);
-        if (d.goals)         save("mli_goals",    d.goals);
-        if (d.timeCapsules)  save("mli_capsules", d.timeCapsules);
-        setConfig(cfg); setKey(k => k + 1); alert("✅ Imported!");
+        if (!cfg) { alert("❌ No profile found in backup."); setImporting(false); return; }
+        const importPayload = {
+          config: cfg,
+          chartData: Array.isArray(d.chartData) ? d.chartData.map(p => ({ ...p, value: isNaN(parseFloat(p.value)) ? 500 : parseFloat(p.value), timestamp: p.timestamp || new Date(p.date).getTime() })) : null,
+          orderBook: Array.isArray(d.orderBook) ? d.orderBook.map(o => ({ ...o, desc: o.desc || o.description || "Imported", change: isNaN(parseFloat(o.change)) ? 0 : parseFloat(o.change), newIndex: isNaN(parseFloat(o.newIndex)) ? "" : parseFloat(o.newIndex).toFixed(2) })) : null,
+          habits: d.habits || null, phases: d.phases || null, skills: d.skills || null,
+          weaknesses: d.weaknesses || null, pressReleases: d.pressReleases || null,
+          moodLog: d.moodLog || null, goals: d.goals || null, timeCapsules: d.timeCapsules || null,
+        };
+        await saveAllData(importPayload);
+        setConfig(cfg);
+        setInitialData(importPayload);
+        setKey(k => k + 1);
+        setAppState("dashboard");
       } catch (err) { alert("❌ Could not read file."); console.error(err); }
       setImporting(false);
     };
     r.readAsText(f); e.target.value = "";
   };
 
-  if (config) return <Dashboard key={config.name + key} config={config} onReset={handleReset} />;
-  if (!started) return <WelcomeScreen onContinue={() => setStarted(true)} />;
+  if (appState === "welcome") return <WelcomeScreen onContinue={() => setAppState("onboarding")} />;
 
-  return (
+  if (appState === "onboarding") return (
     <>
       <Onboarding key={key} onComplete={handleComplete} />
       <div className="fixed bottom-8 left-0 right-0 flex justify-center z-50 px-6">
@@ -1160,4 +1159,6 @@ export default function App() {
       </div>
     </>
   );
+
+  return <Dashboard key={config.name + key} config={config} onReset={handleReset} initialData={initialData} />;
 }
